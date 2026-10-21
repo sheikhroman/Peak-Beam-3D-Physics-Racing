@@ -69,6 +69,14 @@
             transition: opacity 0.2s ease-out;
             z-index: 5;
         }
+        .paint-swatch {
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .paint-swatch:hover, .paint-swatch.active {
+            transform: scale(1.22);
+            border-color: #ffffff;
+            box-shadow: 0 0 12px currentColor;
+        }
     </style>
 </head>
 <body>
@@ -110,14 +118,42 @@
         
         <!-- Top Row: Route Telemetry, Minimap, Damage & Controls -->
         <div class="flex items-start justify-between w-full">
-            <!-- Brand & Info -->
-            <div class="glass-panel rounded-2xl p-3 sm:p-4 text-white flex flex-col gap-1.5 pointer-events-auto max-w-[260px] sm:max-w-none">
-                <div class="flex items-center gap-2">
-                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
-                    <h2 class="text-xs sm:text-sm font-black tracking-widest uppercase bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-sky-200 to-amber-300">
-                        WANGAN COASTAL 4-LANE LOOP
-                    </h2>
+            <!-- Brand & Info + Day/Night and Garage Quick Switch -->
+            <div class="glass-panel rounded-2xl p-3 sm:p-4 text-white flex flex-col gap-2 pointer-events-auto max-w-[280px] sm:max-w-none">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
+                        <h2 class="text-xs sm:text-sm font-black tracking-widest uppercase bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-sky-200 to-amber-300">
+                            WANGAN COASTAL 4-LANE LOOP
+                        </h2>
+                    </div>
+                    <!-- Day/Night Toggle Button -->
+                    <button id="btn-tod-toggle" class="px-2.5 py-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-amber-400/50 text-[10px] font-black text-amber-300 flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md">
+                        <span id="tod-icon">🌙</span>
+                        <span id="tod-label">NIGHT</span>
+                    </button>
                 </div>
+
+                <!-- Custom Garage Controls: Paint Swatches & Body Kits -->
+                <div class="flex flex-wrap items-center gap-2.5 pt-1 border-t border-slate-700/60">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[9px] uppercase font-bold text-slate-400 font-mono">COLOR:</span>
+                        <div id="color-swatches" class="flex items-center gap-1.5">
+                            <!-- Populated via JS -->
+                        </div>
+                    </div>
+                    <div class="h-3 w-px bg-slate-700"></div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[9px] uppercase font-bold text-slate-400 font-mono">KIT:</span>
+                        <select id="select-body-kit" class="bg-slate-900 border border-cyan-500/40 text-cyan-300 rounded-lg px-2 py-0.5 text-[10px] font-bold font-mono focus:outline-none focus:border-cyan-400 cursor-pointer">
+                            <option value="stock">STOCK SUPERCAR</option>
+                            <option value="gt">GT AERO RACER</option>
+                            <option value="widebody">WIDEBODY STANCE</option>
+                            <option value="drift">CYBER DRIFT SPEC</option>
+                        </select>
+                    </div>
+                </div>
+
                 <div class="text-[10px] sm:text-[11px] text-slate-300 flex flex-wrap gap-x-2.5 gap-y-1 font-mono">
                     <span><kbd class="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">W A S D</kbd> Drive</span>
                     <span><kbd class="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">SPACE</kbd> Drift</span>
@@ -405,6 +441,27 @@
         sunLight.shadow.camera.bottom = -d;
         scene.add(sunLight);
 
+        // Hemisphere sky light for natural daylight horizon scattering
+        const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x0f172a, 0.35);
+        scene.add(hemiLight);
+
+        // Night Starfield Particle Dome
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 1200;
+        const starPos = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const rad = 750 + Math.random() * 200;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * (Math.PI / 2.2); // Upper sky dome
+            starPos[i * 3] = rad * Math.sin(phi) * Math.cos(theta);
+            starPos[i * 3 + 1] = rad * Math.cos(phi);
+            starPos[i * 3 + 2] = rad * Math.sin(phi) * Math.sin(theta);
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, transparent: true, opacity: 0.95 });
+        const starField = new THREE.Points(starGeo, starMat);
+        scene.add(starField);
+
         // Coastal Water Surface Plane
         const oceanGeo = new THREE.PlaneGeometry(3000, 3000);
         const oceanMat = new THREE.MeshStandardMaterial({
@@ -599,6 +656,78 @@
         }
 
         /* ==========================================================================
+           DAY / NIGHT CYCLE SYSTEM
+           ========================================================================== */
+        let isNightMode = true;
+
+        function setTimeOfDay(night, animate = true) {
+            isNightMode = night;
+            const todBtn = document.getElementById('btn-tod-toggle');
+            const todIcon = document.getElementById('tod-icon');
+            const todLabel = document.getElementById('tod-label');
+
+            if (todBtn && todIcon && todLabel) {
+                todIcon.innerText = night ? '🌙' : '☀️';
+                todLabel.innerText = night ? 'NIGHT' : 'DAY';
+                todBtn.className = night 
+                    ? "px-2.5 py-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-amber-400/50 text-[10px] font-black text-amber-300 flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md"
+                    : "px-2.5 py-1 rounded-xl bg-amber-400/90 hover:bg-amber-300 border border-amber-200 text-[10px] font-black text-slate-950 flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md";
+            }
+
+            if (night) {
+                // Night atmosphere
+                scene.background.setHex(0x050b14);
+                scene.fog.color.setHex(0x0c1527);
+                scene.fog.density = 0.0035;
+
+                ambientLight.color.setHex(0x38bdf8);
+                ambientLight.intensity = 0.55;
+
+                sunLight.color.setHex(0x93c5fd);
+                sunLight.intensity = 1.1;
+                sunLight.position.set(100, 160, 100);
+
+                hemiLight.color.setHex(0x38bdf8);
+                hemiLight.groundColor.setHex(0x0f172a);
+                hemiLight.intensity = 0.35;
+
+                oceanMat.color.setHex(0x021124);
+                lampGlow.emissiveIntensity = 4.0;
+                starMat.opacity = 0.95;
+
+                hlMat.emissiveIntensity = 5.0;
+                spotL.intensity = 3.5;
+            } else {
+                // Sunny Coastal Daylight
+                scene.background.setHex(0x38bdf8);
+                scene.fog.color.setHex(0x93c5fd);
+                scene.fog.density = 0.0018;
+
+                ambientLight.color.setHex(0xffffff);
+                ambientLight.intensity = 1.25;
+
+                sunLight.color.setHex(0xfffaed);
+                sunLight.intensity = 2.8;
+                sunLight.position.set(-140, 220, 120);
+
+                hemiLight.color.setHex(0xe0f2fe);
+                hemiLight.groundColor.setHex(0x64748b);
+                hemiLight.intensity = 0.85;
+
+                oceanMat.color.setHex(0x0284c7);
+                lampGlow.emissiveIntensity = 0.2;
+                starMat.opacity = 0.0;
+
+                hlMat.emissiveIntensity = 1.0;
+                spotL.intensity = 0.5;
+            }
+        }
+
+        document.getElementById('btn-tod-toggle').addEventListener('click', () => {
+            setTimeOfDay(!isNightMode);
+        });
+
+        /* ==========================================================================
            4. SUPERCAR CONSTRUCTION WITH PROCEDURAL CLEARCOAT & CRUMPLE MESH
            ========================================================================== */
         const carGroup = new THREE.Group();
@@ -629,11 +758,11 @@
         cabin.position.set(0, CAR_HEIGHT + 0.25, -0.2);
         carGroup.add(cabin);
 
-        // Rear carbon spoiler
+        // Stock rear spoiler
         const spoilerMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.6 });
-        const spoiler = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH * 0.95, 0.08, 0.4), spoilerMat);
-        spoiler.position.set(0, CAR_HEIGHT + 0.45, -CAR_LENGTH * 0.46);
-        carGroup.add(spoiler);
+        const stockSpoiler = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH * 0.95, 0.08, 0.4), spoilerMat);
+        stockSpoiler.position.set(0, CAR_HEIGHT + 0.45, -CAR_LENGTH * 0.46);
+        carGroup.add(stockSpoiler);
 
         // Headlights & spotlights
         const hlMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x38bdf8, emissiveIntensity: 5 });
@@ -693,6 +822,167 @@
             carGroup.add(wGroup);
             wheelMeshes.push(wGroup);
         });
+
+        /* ==========================================================================
+           GARAGE CUSTOMIZATION: 5 PAINT COLORS & 4 BODY KIT VERSIONS
+           ========================================================================== */
+        const CAR_COLORS = [
+            { id: 'cyan',   name: 'Cyberpunk Cyan', hex: 0x06b6d4, css: '#06b6d4', rough: 0.20, metal: 0.85 },
+            { id: 'red',    name: 'Hyper Red',       hex: 0xef4444, css: '#ef4444', rough: 0.15, metal: 0.90 },
+            { id: 'black',  name: 'Carbon Matte',   hex: 0x18181b, css: '#27272a', rough: 0.65, metal: 0.35 },
+            { id: 'gold',   name: 'Sunburst Gold',  hex: 0xf59e0b, css: '#f59e0b', rough: 0.18, metal: 0.95 },
+            { id: 'acid',   name: 'Acid Green',     hex: 0x84cc16, css: '#84cc16', rough: 0.22, metal: 0.80 }
+        ];
+
+        let currentColorIdx = 0;
+        let currentKit = 'stock';
+
+        // Modular Body Kit Accessory Groups
+        const kitParts = {
+            gt: new THREE.Group(),
+            widebody: new THREE.Group(),
+            drift: new THREE.Group()
+        };
+
+        const carbonMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.6 });
+        const neonUnderglowMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4, transparent: true, opacity: 0.85 });
+
+        // --- 1. GT Aero Racer Kit (High-downforce GT Carbon Wing + Front Splitter + Canards) ---
+        const gtWing = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH * 1.15, 0.06, 0.55), carbonMat);
+        gtWing.position.set(0, CAR_HEIGHT + 0.95, -CAR_LENGTH * 0.48);
+        const gtPillarL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.6, 0.3), carbonMat);
+        gtPillarL.position.set(-CAR_WIDTH * 0.32, CAR_HEIGHT + 0.65, -CAR_LENGTH * 0.48);
+        const gtPillarR = gtPillarL.clone();
+        gtPillarR.position.x = CAR_WIDTH * 0.32;
+
+        const gtFrontSplitter = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH * 1.05, 0.05, 0.6), carbonMat);
+        gtFrontSplitter.position.set(0, 0.18, CAR_LENGTH * 0.51);
+
+        const gtCanardL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.04, 0.25), carbonMat);
+        gtCanardL.rotation.z = 0.25;
+        gtCanardL.position.set(CAR_WIDTH * 0.52, 0.45, CAR_LENGTH * 0.44);
+        const gtCanardR = gtCanardL.clone();
+        gtCanardR.rotation.z = -0.25;
+        gtCanardR.position.x = -CAR_WIDTH * 0.52;
+
+        kitParts.gt.add(gtWing, gtPillarL, gtPillarR, gtFrontSplitter, gtCanardL, gtCanardR);
+        carGroup.add(kitParts.gt);
+
+        // --- 2. Widebody Stance Kit (Flared bolt-on fenders & slammed side skirts) ---
+        const flareMat = new THREE.MeshStandardMaterial({ color: 0x06b6d4, roughness: 0.2, metalness: 0.85 });
+        const flareFrontR = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.55, 1.4), flareMat);
+        flareFrontR.position.set(CAR_WIDTH * 0.56, 0.48, CAR_LENGTH * 0.32);
+        const flareFrontL = flareFrontR.clone();
+        flareFrontL.position.x = -CAR_WIDTH * 0.56;
+
+        const flareRearR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.58, 1.5), flareMat);
+        flareRearR.position.set(CAR_WIDTH * 0.58, 0.48, -CAR_LENGTH * 0.32);
+        const flareRearL = flareRearR.clone();
+        flareRearL.position.x = -CAR_WIDTH * 0.58;
+
+        const sideSkirtR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, CAR_LENGTH * 0.55), carbonMat);
+        sideSkirtR.position.set(CAR_WIDTH * 0.55, 0.18, 0);
+        const sideSkirtL = sideSkirtR.clone();
+        sideSkirtL.position.x = -CAR_WIDTH * 0.55;
+
+        const ducktail = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH * 0.98, 0.22, 0.25), carbonMat);
+        ducktail.rotation.x = -0.3;
+        ducktail.position.set(0, CAR_HEIGHT + 0.48, -CAR_LENGTH * 0.48);
+
+        kitParts.widebody.add(flareFrontR, flareFrontL, flareRearR, flareRearL, sideSkirtR, sideSkirtL, ducktail);
+        carGroup.add(kitParts.widebody);
+
+        // --- 3. Cyber Drift Spec (Neon Underglow + Quad Cannon Shotgun Exhausts + Drift Wing) ---
+        const underglowGeo = new THREE.PlaneGeometry(CAR_WIDTH * 0.9, CAR_LENGTH * 0.85);
+        const underglowMesh = new THREE.Mesh(underglowGeo, neonUnderglowMat);
+        underglowMesh.rotation.x = -Math.PI / 2;
+        underglowMesh.position.set(0, 0.06, 0);
+
+        const exhaustPipeGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.65, 12);
+        exhaustPipeGeo.rotateX(Math.PI / 2);
+        const exhaustMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.95, roughness: 0.1 });
+        const ex1 = new THREE.Mesh(exhaustPipeGeo, exhaustMat);
+        ex1.position.set(-0.35, 0.28, -CAR_LENGTH * 0.54);
+        const ex2 = ex1.clone(); ex2.position.x = -0.15;
+        const ex3 = ex1.clone(); ex3.position.x = 0.15;
+        const ex4 = ex1.clone(); ex4.position.x = 0.35;
+
+        const driftSpoiler = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH * 1.08, 0.05, 0.38), carbonMat);
+        driftSpoiler.position.set(0, CAR_HEIGHT + 0.65, -CAR_LENGTH * 0.5);
+
+        kitParts.drift.add(underglowMesh, ex1, ex2, ex3, ex4, driftSpoiler);
+        carGroup.add(kitParts.drift);
+
+        // Function to apply Selected Car Color
+        function applyCarColor(idx) {
+            currentColorIdx = idx;
+            const def = CAR_COLORS[idx];
+            carPaintMat.color.setHex(def.hex);
+            carPaintMat.roughness = def.rough;
+            carPaintMat.metalness = def.metal;
+
+            // Sync Widebody flared arches paint
+            flareMat.color.setHex(def.hex);
+            flareMat.roughness = def.rough;
+            flareMat.metalness = def.metal;
+
+            // Dynamic Underglow neon matching paint
+            neonUnderglowMat.color.setHex(def.hex);
+
+            // Update UI Swatches active indicator
+            document.querySelectorAll('.paint-swatch').forEach((el, i) => {
+                if (i === idx) {
+                    el.classList.add('active', 'ring-2', 'ring-white');
+                } else {
+                    el.classList.remove('active', 'ring-2', 'ring-white');
+                }
+            });
+        }
+
+        // Function to apply Selected Car Body Kit
+        function applyBodyKit(kitName) {
+            currentKit = kitName;
+
+            // Visibility of modular parts
+            kitParts.gt.visible = (kitName === 'gt');
+            kitParts.widebody.visible = (kitName === 'widebody');
+            kitParts.drift.visible = (kitName === 'drift');
+
+            // Stock spoiler shown on stock, hidden when race wings are active
+            stockSpoiler.visible = (kitName === 'stock');
+
+            // Stance adjust: Widebody pushes wheels outwards for deep-dish fitment
+            const stanceOutset = (kitName === 'widebody') ? 0.08 : 0.0;
+            wheelMeshes[0].position.x = (CAR_WIDTH * 0.52 + stanceOutset);
+            wheelMeshes[1].position.x = -(CAR_WIDTH * 0.52 + stanceOutset);
+            wheelMeshes[2].position.x = (CAR_WIDTH * 0.52 + stanceOutset * 1.2);
+            wheelMeshes[3].position.x = -(CAR_WIDTH * 0.52 + stanceOutset * 1.2);
+        }
+
+        // Build UI Paint Swatches
+        const swatchContainer = document.getElementById('color-swatches');
+        if (swatchContainer) {
+            CAR_COLORS.forEach((c, idx) => {
+                const btn = document.createElement('button');
+                btn.className = `paint-swatch w-4 h-4 rounded-full border border-white/40 cursor-pointer shadow-sm ${idx === 0 ? 'active ring-2 ring-white' : ''}`;
+                btn.style.backgroundColor = c.css;
+                btn.title = c.name;
+                btn.addEventListener('click', () => applyCarColor(idx));
+                swatchContainer.appendChild(btn);
+            });
+        }
+
+        // Body Kit Select listener
+        const kitSelect = document.getElementById('select-body-kit');
+        if (kitSelect) {
+            kitSelect.addEventListener('change', (e) => {
+                applyBodyKit(e.target.value);
+            });
+        }
+
+        // Default initial kit & color
+        applyCarColor(0);
+        applyBodyKit('stock');
 
         /* ==========================================================================
            5. METALLIC SPARKS & BEAMNG CRUSH DEFORMATION
